@@ -63,7 +63,8 @@
             <input id="f-email" type="email" placeholder="you@company.com" />
           </div>
         </div>
-        <p class="field-hint">This stays in your browser until you export it. It is not sent anywhere by typing it here.</p>
+        <p class="field-hint">This stays in your browser until you export it. Typing it here doesn't send it anywhere — click below if you want the email reminders.</p>
+        <button class="btn btn-quiet btn-sm" onclick="deskSubscribe()">Email me the pre-flight reminders</button>
       </div>
 
       <div class="card" id="screen-a"></div>
@@ -129,20 +130,16 @@
 
 <div class="toast" id="toast"></div>
 
-<script>
-  window.IGNITION_CONFIG = {
-    // Replace with real Stripe Payment Links before launch. See README.md → "Stripe setup".
-    stripePreflightLink: "",
-    stripeSprintLink: ""
-  };
-</script>
 <script src="/assets/app.js"></script>
 <script src="/assets/desk.js"></script>
 <script>
   (function () {
+    // /setup.html?tier=sprint (from homepage pricing links) jumps straight
+    // to checkout. /setup.html?session_id=... (Stripe's own redirect back)
+    // is handled by confirmCheckoutFromRedirect() inside desk.js — leave it.
     var params = new URLSearchParams(window.location.search);
     var wantTier = params.get("tier");
-    if (wantTier === "sprint" || wantTier === "preflight") {
+    if ((wantTier === "sprint" || wantTier === "preflight") && !params.get("session_id")) {
       document.addEventListener("DOMContentLoaded", function () {
         setTimeout(function () { deskCheckout(wantTier); }, 300);
       });

@@ -322,25 +322,72 @@
   }
 
   function goCheckout(tier) {
-    // Placeholder: wire this to real Stripe Payment Links / Checkout Sessions.
-    // See README.md → "Stripe setup" for product IDs referenced here.
-    var links = {
-      preflight: (window.IGNITION_CONFIG && window.IGNITION_CONFIG.stripePreflightLink) || "#",
-      sprint: (window.IGNITION_CONFIG && window.IGNITION_CONFIG.stripeSprintLink) || "#"
-    };
-    var url = links[tier];
-    if (url && url !== "#") {
-      window.location.href = url;
-      return;
-    }
-    // Dev fallback so the flow is demoable before Stripe keys exist.
-    if (window.confirm("Stripe isn't wired up yet. Simulate a successful " + tier + " purchase for local testing?")) {
-      set({ tier: tier });
-      toast(tier === "sprint" ? "Sprint Pass unlocked (simulated)." : "Pre-flight Kit unlocked (simulated).");
-      window.scrollTo({ top: 0, behavior: "smooth" });
-    }
+    var btns = document.querySelectorAll('[data-checkout="' + tier + '"], #btn-checkout-' + tier);
+
+    fetch("/api/create-checkout-session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        tier: tier,
+        email: state.email,
+        llc: state.llc,
+        first_name: state.signer
+      })
+    })
+      .then(function (r) {
+        if (!r.ok) throw new Error("checkout endpoint unavailable");
+        return r.json();
+      })
+      .then(function (data) {
+        if (data && data.url) {
+          window.location.href = data.url;
+        } else {
+          throw new Error(data && data.error ? data.error : "no checkout url returned");
+        }
+      })
+      .catch(function (err) {
+        // Backend not deployed yet (e.g. static-only preview via
+        // `python3 -m http.server`, or Stripe env vars not set). Fall
+        // back to a local simulation so the funnel stays demoable.
+        console.warn("Checkout endpoint unavailable, using local simulation:", err.message);
+        if (window.confirm("Checkout isn't live on this deployment yet. Simulate a successful " + tier + " purchase for local testing?")) {
+          set({ tier: tier });
+          toast(tier === "sprint" ? "Sprint Pass unlocked (simulated)." : "Pre-flight Kit unlocked (simulated).");
+          window.scrollTo({ top: 0, behavior: "smooth" });
+        }
+      });
   }
   window.deskCheckout = goCheckout;
+
+  function confirmCheckoutFromRedirect() {
+    var params = new URLSearchParams(window.location.search);
+    var sessionId = params.get("session_id");
+    if (!sessionId) return;
+
+    fetch("/api/confirm-checkout?session_id=" + encodeURIComponent(sessionId))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        if (data && data.ok && (data.tier === "preflight" || data.tier === "sprint")) {
+          set({
+            tier: data.tier,
+            email: data.email || state.email,
+            llc: data.llc || state.llc
+          });
+          toast((data.tier === "sprint" ? "Sprint Pass" : "Pre-flight Kit") + " unlocked. Welcome in.");
+        } else {
+          toast("We couldn't verify that payment yet — email help@ignitiondesk.biz if this persists.");
+        }
+      })
+      .catch(function () {
+        toast("We couldn't verify that payment yet — email help@ignitiondesk.biz if this persists.");
+      })
+      .finally(function () {
+        params.delete("session_id");
+        params.delete("unlocked");
+        var clean = window.location.pathname + (params.toString() ? "?" + params.toString() : "");
+        window.history.replaceState({}, "", clean);
+      });
+  }
 
   function exportFile() {
     var data = JSON.stringify(state, null, 2);
@@ -356,5 +403,28 @@
     toast("Exported. Store this file somewhere that isn't a browser tab.");
   }
 
-  document.addEventListener("DOMContentLoaded", render);
+  function subscribeEmail() {
+    if (!state.email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(state.email)) {
+      toast("Enter a valid email first.");
+      return;
+    }
+    fetch("/api/subscribe", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ email: state.email, first_name: state.signer, llc: state.llc })
+    })
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        toast(data && data.ok ? "Sent — check your inbox." : "Couldn't send that right now.");
+      })
+      .catch(function () {
+        toast("Email isn't wired up on this deployment yet.");
+      });
+  }
+  window.deskSubscribe = subscribeEmail;
+
+  document.addEventListener("DOMContentLoaded", function () {
+    render();
+    confirmCheckoutFromRedirect();
+  });
 })();

@@ -44,46 +44,101 @@ with a paywall card (`renderGate`) until the stored tier is high enough.
 **Never put vendor field-maps, order amounts, or SKU suggestions in HTML
 that isn't behind a `sprint` gate** — that's the method being sold.
 
-## Stripe setup (required before taking real money)
+## Backend: Stripe Checkout + email (serverless functions)
 
-1. Create two Products in Stripe:
-   - `preflight_kit` — $29 one-time.
-   - `sprint_pass` — $149 one-time. Add a required checkbox at checkout
-     (Stripe Checkout custom fields, or a pre-checkout confirmation step)
-     quoting: *"I understand the 30-day guarantee is a refund on the Sprint
-     Pass, depends on my on-time steps, and is defined in the Terms."*
-2. Generate a Payment Link for each product. On success, redirect back to
-   `setup.html?unlocked=preflight` / `setup.html?unlocked=sprint`.
-3. Set the two links in `setup.html`:
-   ```html
-   <script>
-     window.IGNITION_CONFIG = {
-       stripePreflightLink: "https://buy.stripe.com/xxxxx",
-       stripeSprintLink: "https://buy.stripe.com/yyyyy"
-     };
-   </script>
-   ```
-4. `desk.js` currently unlocks a tier locally when Stripe links are absent
-   (a `confirm()` dev fallback) so the funnel is demoable before Stripe is
-   wired up. Once real links are set, that fallback is unreachable — the
-   button navigates to Stripe instead. **The actual unlock still needs a
-   server**: after a successful Stripe payment, verify the webhook
-   server-side and email the customer their unlock link (or set a signed
-   cookie/token the desk checks). Client-only `localStorage` unlocking is
-   fine for a demo; it is not sufficient for a paid product, since a user
-   could set `tier: "sprint"` in devtools. Treat the current client-side
-   gate as UX polish, not the real paywall, until that backend exists.
+The `/api` directory is a set of Vercel-style Node.js serverless functions
+that make the paywall real, not just a `localStorage` flag:
+
+```
+api/create-checkout-session.js   POST — starts a real Stripe Checkout Session
+api/confirm-checkout.js          GET  — server-side verifies payment before unlocking
+api/stripe-webhook.js            POST — Stripe webhook; sends the unlock email
+api/subscribe.js                 POST — sends Email 1 when the setup form's email is submitted
+api/_lib/resend.js               Minimal Resend client (plain fetch, no SDK)
+api/_lib/templates.js            Transactional email copy + {{merge}} tags
+```
+
+**Why this design:** `desk.js` no longer decides what's unlocked — it asks
+the server. Clicking a Sprint/Pre-flight button calls
+`create-checkout-session`, which redirects to real Stripe Checkout.
+Stripe redirects back to `setup.html?session_id=...`, and `desk.js` calls
+`confirm-checkout`, which re-checks the session with Stripe's API
+(`payment_status === "paid"`) before setting the tier. A user can still
+edit `localStorage` in devtools, but that no longer requires trusting the
+client — the real unlock is `confirm-checkout`'s server-side check, and
+`stripe-webhook` is the durable backstop if the browser never gets back to
+the redirect.
+
+If these functions aren't deployed (e.g. previewing with
+`python3 -m http.server`), the fetch calls fail and `desk.js` falls back
+to a local `confirm()` simulation — that's for demoing the funnel only,
+never for production.
+
+### 1. Create Stripe products
+
+- `preflight_kit` — $29 one-time.
+- `sprint_pass` — $149 one-time.
+
+Copy each **Price ID** (`price_...`, not the Product ID).
+
+### 2. Deploy on Vercel (or any platform that runs Node serverless functions
+   the same way — Netlify Functions and Cloudflare Pages Functions need the
+   handler signature adapted)
+
+```bash
+npm install
+vercel --prod
+```
+
+### 3. Set environment variables (Vercel dashboard → Settings → Environment Variables)
+
+| Variable | Purpose |
+|---|---|
+| `STRIPE_SECRET_KEY` | `sk_live_...` / `sk_test_...` |
+| `STRIPE_PRICE_PREFLIGHT` | Price ID for the $29 product |
+| `STRIPE_PRICE_SPRINT` | Price ID for the $149 product |
+| `STRIPE_WEBHOOK_SECRET` | From the Stripe Dashboard webhook endpoint, or `stripe listen` in dev |
+| `SITE_URL` | e.g. `https://ignitiondesk.biz` (used to build Checkout redirect URLs) |
+| `RESEND_API_KEY` | From resend.com — omit to log emails instead of sending (safe default in dev) |
+| `RESEND_FROM` | e.g. `Ignition <help@ignitiondesk.biz>` (must be a verified Resend sending domain) |
+
+### 4. Point a Stripe webhook at your deployment
+
+Dashboard → Developers → Webhooks → Add endpoint:
+`https://ignitiondesk.biz/api/stripe-webhook`, event: `checkout.session.completed`.
+Copy the signing secret into `STRIPE_WEBHOOK_SECRET`.
+
+For local testing: `stripe listen --forward-to localhost:3000/api/stripe-webhook`.
+
+### 5. The required guarantee checkbox
+
+`create-checkout-session.js` sets `consent_collection.terms_of_service =
+"required"` on the Sprint Pass session, with `custom_text` quoting the
+exact guarantee-scope sentence from the kit. Stripe renders this as a
+required checkbox on the Checkout page itself — no extra frontend work
+needed.
+
+### What's still manual
+
+Emails 2–7 of the nurture sequence are **not** auto-scheduled by these
+functions — sending a "wait 18 hours, then day 2, day 3…" sequence
+reliably needs either a database + cron (Vercel Cron can call a
+`/api/cron/*` route, but you'd need to persist signup timestamps
+somewhere — KV, Postgres, etc.) or, more simply, importing the
+`emails/01`–`07` text into your ESP's own drip/automation feature (Resend
+Broadcasts, Loops, Customer.io) and letting it handle timing. `subscribe.js`
+only fires Email 1 immediately; treat wiring the rest as the next
+milestone once Sprint 001 (kit §6) is running.
 
 ## Email sequence
 
-`emails/01` through `emails/07` are the seven onboarding emails, ready to
-paste into Resend, Postmark, Buttondown, or MailerLite. Trigger email 1 on
-`setup.html` form submit (capture `{{first_name}}`, `{{llc}}`, and email
-into your ESP or a lightweight serverless function). Stop the sequence for
-anyone who buys the Sprint Pass and move them to a separate "clock"
-sequence (day-4 DUNS reminder, day-14 vendor reminder, day-20 review
-prompt, day-30 audit) — not included here; build it after the first paid
-customer, per the kit's sequencing.
+`emails/01` through `emails/07` are the seven onboarding emails in plain
+text — `api/subscribe.js` sends Email 1 immediately from the same copy
+(see "Backend" above for wiring the rest). Stop the sequence for anyone
+who buys the Sprint Pass and move them to a separate "clock" sequence
+(day-4 DUNS reminder, day-14 vendor reminder, day-20 review prompt, day-30
+audit) — not included here; build it after the first paid customer, per
+the kit's sequencing.
 
 ## Guarantee — operational notes
 
@@ -98,21 +153,27 @@ that matter operationally, not just legally:
 
 ## Deploying
 
-Any static host works. Example with Netlify:
+The pages themselves (`index.html`, `setup.html`, etc.) are plain static
+files and will serve from any static host. **The paywall backend
+(`/api/*`) needs a platform that runs Node.js serverless functions** —
+this repo's handler signature (`module.exports = async (req, res) => {}`,
+`req.query`, `res.status().json()`) is Vercel's convention:
 
 ```bash
-netlify deploy --prod --dir .
-```
-
-Or Vercel:
-
-```bash
+npm install
 vercel --prod
 ```
 
-Point `ignitiondesk.biz` DNS at whichever host you choose. No environment
-variables are required for the static site itself; Stripe keys live in
-Stripe's dashboard/webhook config, not in this repo.
+If you deploy the static files elsewhere (Netlify, Cloudflare Pages, GitHub
+Pages, S3) instead, the `/api` calls will 404 and `desk.js` automatically
+falls back to the local `confirm()` simulation described above — fine for
+a design preview, not for taking real payments. To run the backend on
+Netlify or Cloudflare Pages, port the functions in `/api` to that
+platform's handler signature (Netlify Functions' `(event, context)`, or a
+Cloudflare Pages Function's `onRequestPost({ request, env })`) — the
+Stripe/Resend logic inside each file doesn't need to change.
+
+Point `ignitiondesk.biz` DNS at whichever host you choose.
 
 ## Local preview
 
@@ -126,9 +187,10 @@ python3 -m http.server 8080
 1. Homepage hero + sprint cards + pricing — done in `index.html`.
 2. Terms §3 guarantee — done in `terms.html`.
 3. Setup page copy — done in `setup.html`.
-4. Create Stripe products $29 and $149 — see "Stripe setup" above.
-5. Load emails 1–7, trigger email 1 on setup form submit — see "Email
-   sequence" above.
+4. Create Stripe products $29 and $149, deploy `/api`, set env vars — see
+   "Backend" above.
+5. Emails 1–7 are ready; Email 1 fires automatically via `/api/subscribe` —
+   see "Email sequence" above.
 6. Vendor field maps hidden behind Sprint gate — enforced by `desk.js`.
 7. Post the Day-1 Reddit thread (kit §5) once the desk is live.
 8. Run Sprint 001 on a real entity, keep dated proof, publish the redacted
