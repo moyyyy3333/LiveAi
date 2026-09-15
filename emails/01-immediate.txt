@@ -1,0 +1,24 @@
+SEND: Immediately on setup form submit
+SUBJECT: {{llc}} is on the desk. Export it tonight.
+PREVIEW: Browser storage is not a filing cabinet.
+---
+
+{{first_name}} —
+
+Pre-flight is open for {{llc}}.
+
+Two things that are true on this version of the desk:
+
+1. The company file lives in this browser until you export it.
+2. The 30-day clock has not started. It starts the day the LLC checking account opens.
+
+Tonight: open the desk, lock the legal name exactly as the state has it, and export. If you clear cookies next week and have no export, the file is gone. That is not a metaphor.
+
+What you can do for $0: see the NAP rules, read the scam list, look at the operating-agreement preview.
+
+What you cannot do yet: the vendor packets and the dated checklist. Those are the Sprint Pass, because they are the part that has to be right on a Tuesday, not interesting on a Sunday.
+
+Desk: https://ignitiondesk.biz/setup.html
+
+— Ignition
+help@ignitiondesk.biz

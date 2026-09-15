@@ -1,0 +1,25 @@
+SEND: Day 2
+SUBJECT: EIN is free. The mill is the product.
+PREVIEW: IRS.gov. Nothing else.
+---
+
+{{first_name}} —
+
+Apply for the EIN on IRS.gov.
+
+Not on a site that googles well for "get an EIN today."
+Not through a dashboard that charges $79 to type the same form.
+Not through anyone who needs your Social Security number in a chat box to "expedite."
+
+The IRS issues EINs to new LLCs at no charge. If a page is selling you the number, it is selling you a printout of a free page.
+
+When you file:
+
+- Use the exact legal name from the state.
+- The responsible party is a real principal. That is an IRS requirement. It is not Ignition collecting a Social Security number. We do not want it and we do not store it.
+
+After the notice lands, put it in the export folder next to the formation document. You will need both for the bank.
+
+Desk: https://ignitiondesk.biz
+
+— Ignition
