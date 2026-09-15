@@ -10,7 +10,7 @@
  *   SITE_URL                 (e.g. https://ignitiondesk.biz — used for redirect URLs)
  */
 
-const Stripe = require("stripe");
+const { getStripe, validatePriceId, stripeErrorInfo } = require("./_lib/stripe");
 
 module.exports = async (req, res) => {
   if (req.method !== "POST") {
@@ -18,12 +18,12 @@ module.exports = async (req, res) => {
     return;
   }
 
-  if (!process.env.STRIPE_SECRET_KEY) {
-    res.status(500).json({ error: "Stripe is not configured on this deployment yet." });
+  const client = getStripe();
+  if (client.error) {
+    res.status(500).json({ error: client.error });
     return;
   }
-
-  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+  const stripe = client.stripe;
 
   let body = req.body;
   if (!body || typeof body === "string") {
@@ -47,11 +47,13 @@ module.exports = async (req, res) => {
     return;
   }
 
-  const priceId = priceIds[tier];
-  if (!priceId) {
-    res.status(500).json({ error: `No Stripe price configured for tier '${tier}'.` });
+  const priceEnvName = tier === "sprint" ? "STRIPE_PRICE_SPRINT" : "STRIPE_PRICE_PREFLIGHT";
+  const priceError = validatePriceId(priceEnvName);
+  if (priceError) {
+    res.status(500).json({ error: priceError });
     return;
   }
+  const priceId = priceIds[tier];
 
   const siteUrl = process.env.SITE_URL || `https://${req.headers.host}`;
 
@@ -89,6 +91,6 @@ module.exports = async (req, res) => {
     res.status(200).json({ url: session.url });
   } catch (err) {
     console.error("create-checkout-session error", err);
-    res.status(500).json({ error: "Could not start checkout." });
+    res.status(500).json(Object.assign({ error: "Could not start checkout." }, stripeErrorInfo(err)));
   }
 };

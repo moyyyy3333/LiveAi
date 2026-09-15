@@ -16,7 +16,7 @@
  * runtime not to pre-parse the body, so it can be read and hashed as-is.
  */
 
-const Stripe = require("stripe");
+const { getStripe } = require("./_lib/stripe");
 const { sendEmail } = require("./_lib/resend");
 const { merge, PREFLIGHT_UNLOCKED, SPRINT_UNLOCKED } = require("./_lib/templates");
 
@@ -34,12 +34,17 @@ async function handler(req, res) {
     return;
   }
 
-  if (!process.env.STRIPE_SECRET_KEY || !process.env.STRIPE_WEBHOOK_SECRET) {
-    res.status(500).send("Stripe webhook is not configured on this deployment yet.");
+  const client = getStripe();
+  if (client.error) {
+    res.status(500).send(client.error);
+    return;
+  }
+  if (!process.env.STRIPE_WEBHOOK_SECRET) {
+    res.status(500).send("STRIPE_WEBHOOK_SECRET is not set on this deployment.");
     return;
   }
 
-  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+  const stripe = client.stripe;
   const sig = req.headers["stripe-signature"];
 
   let event;

@@ -7,7 +7,7 @@
  * Returns: { ok: true, tier, email, llc } or { ok: false, error }
  */
 
-const Stripe = require("stripe");
+const { getStripe, stripeErrorInfo } = require("./_lib/stripe");
 
 module.exports = async (req, res) => {
   if (req.method !== "GET") {
@@ -15,8 +15,9 @@ module.exports = async (req, res) => {
     return;
   }
 
-  if (!process.env.STRIPE_SECRET_KEY) {
-    res.status(500).json({ ok: false, error: "Stripe is not configured on this deployment yet." });
+  const client = getStripe();
+  if (client.error) {
+    res.status(500).json({ ok: false, error: client.error });
     return;
   }
 
@@ -27,7 +28,7 @@ module.exports = async (req, res) => {
     return;
   }
 
-  const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+  const stripe = client.stripe;
 
   try {
     const session = await stripe.checkout.sessions.retrieve(sessionId);
@@ -51,6 +52,6 @@ module.exports = async (req, res) => {
     });
   } catch (err) {
     console.error("confirm-checkout error", err);
-    res.status(500).json({ ok: false, error: "Could not verify checkout session." });
+    res.status(500).json(Object.assign({ ok: false, error: "Could not verify checkout session." }, stripeErrorInfo(err)));
   }
 };
